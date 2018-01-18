@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xmmintrin.h>
+#include <immintrin.h>
 
 #include "memcpy.h"
 #include "rand.h"
@@ -80,6 +82,8 @@ enum {
 	T_MEMMOVE	= 1U << 1,
 	T_SIMPLE	= 1U << 2,
 	T_HYBRID	= 1U << 3,
+	T_SSE		= 1U << 4,
+	T_AVX		= 1U << 5,
 };
 
 #define do_test(test, fn)	do {					\
@@ -122,6 +126,43 @@ static void simple_memcpy(void *dst, void const *src, size_t len)
 		*d++ = *s++;
 }
 
+static void sse_memcpy(void *dst, void const *src, size_t len)
+{
+	__m128 val;
+	float *d = dst;
+	float const *s = src;
+
+	if (len < 16)
+		return;
+
+
+	for (int i = 0; i < len; i += 16)
+	{
+		val = _mm_load_ps(s);
+		_mm_store_ps(d, val);
+		d += 4;
+		s += 4;
+	}
+}
+
+static void avx_memcpy(void *dst, void const *src, size_t len)
+{
+	__m256 val;
+	float *d = dst;
+	float const *s = src;
+
+	if (len < 32)
+		return;
+
+	for (int i = 0; i < len; i += 32)
+	{
+		val = _mm256_load_ps(s);
+		_mm256_store_ps(d, val);
+		d += 8;
+		s += 8;
+	}
+}
+
 static void t_simple(struct memcpy_test *test)
 {
 	do_test(test, simple_memcpy);
@@ -133,6 +174,16 @@ static void t_hybrid(struct memcpy_test *test)
 		do_test(test, simple_memcpy);
 	else
 		do_test(test, memcpy);
+}
+
+static void t_sse(struct memcpy_test *test)
+{
+	do_test(test, sse_memcpy);
+}
+
+static void t_avx(struct memcpy_test *test)
+{
+	do_test(test, avx_memcpy);
 }
 
 static struct memcpy_type t[] = {
@@ -155,6 +206,16 @@ static struct memcpy_type t[] = {
 		.name = "hybrid",
 		.mask = T_HYBRID,
 		.fn = t_hybrid,
+	},
+	{
+		.name = "sse",
+		.mask = T_SSE,
+		.fn = t_sse,
+	},
+	{
+		.name = "avx",
+		.mask = T_AVX,
+		.fn = t_avx,
 	},
 	{
 		.name = NULL,
@@ -200,8 +261,8 @@ static int setup_tests(void)
 	void *src, *dst;
 	int i;
 
-	src = malloc(BUF_SIZE);
-	dst = malloc(BUF_SIZE);
+	src = aligned_alloc(128, BUF_SIZE);
+	dst = aligned_alloc(128, BUF_SIZE);
 	if (!src || !dst) {
 		free(src);
 		free(dst);
